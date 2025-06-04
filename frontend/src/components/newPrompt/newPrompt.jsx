@@ -2,7 +2,7 @@ import Upload from '../upload/upload';
 import { IKImage } from 'imagekitio-react';
 import './newPrompt.css'
 import { useEffect, useRef, useState } from 'react';
-import openai from '../../lib/openai';
+import { createAssistant, createThread, streamRun } from '../../lib/langgraph';
 import Markdown from "react-markdown"
 
 const NewPrompt = () => {
@@ -23,16 +23,10 @@ const NewPrompt = () => {
     useEffect(() => {
         const initialize = async () => {
           try {
-            // Create an Assistant (with or without special instructions, tools, etc.)
-            const newAssistant = await openai.beta.assistants.create({
-              name: "Vision Assistant",
-              instructions: "You are a helpful assistant with image understanding.",
-              model: "gpt-4o", // includes built-in vision
-            });
+            const newAssistant = await createAssistant();
             setAssistant(newAssistant);
-    
-            // Create a fresh Thread for this conversation
-            const newThread = await openai.beta.threads.create();
+
+            const newThread = await createThread();
             setThread(newThread);
           } catch (error) {
             console.error("Error creating assistant/thread:", error);
@@ -73,32 +67,18 @@ const NewPrompt = () => {
           });
         }
     
-        await openai.beta.threads.messages.create(thread.id, {
-            role: "user",
-            content: contentArray,
-          });
-    
-          // Clear any old streaming text
-          setAnswer("");
-    
-          // 4) Stream the assistant's response in real time
-          openai.beta.threads.runs
-            .stream(thread.id, { assistant_id: assistant.id })
-            .on("textCreated", (initialText) => {
-              // The first chunk of text from the assistant
-              setAnswer(initialText);
-            })
-            .on("textDelta", (delta, snapshot) => {
-              // Subsequent partial tokens
-              setAnswer((prev) => prev + delta.value);
-            })
-            .on("end", () => {
-              // Streaming finished
-              console.log("Streaming complete.");
-            })
-            .on("error", (err) => {
-              console.error("Streaming error:", err);
-            });
+        // Clear any old streaming text
+        setAnswer("");
+
+        // Stream assistant response using LangGraph API
+        await streamRun(
+          thread.id,
+          assistant.id,
+          { content: contentArray },
+          (token) => {
+            setAnswer((prev) => prev + token);
+          }
+        );
     
           // Reset user input & image state
           setImg({
